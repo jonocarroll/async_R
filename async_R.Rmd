@@ -2,7 +2,7 @@
 title: "Asynchronous R"
 subtitle: "Welcome to the future!"
 author: "Jonathan Carroll"
-date: "Last uupdated: `r Sys.Date()`"
+date: "Last updated: `r Sys.Date()`"
 output:
   xaringan::moon_reader:
     lib_dir: libs
