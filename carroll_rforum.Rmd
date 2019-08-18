@@ -1,0 +1,410 @@
+---
+title: "Asynchronous R"
+subtitle: "Welcome to the future!"
+author: "Jonathan Carroll"
+date: "2018/06/18 (updated: `r Sys.Date()`)"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+class: middle
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+```
+
+# Asynchronous R
+
+Topics I'll be convering:
+
+- Synchronous vs asynchronous evaluation
+- `future`
+- `promises`
+- `furrr`
+- `RStudio Jobs`
+
+.footnote[
+  -- I'm not an expert in this, I am merely standing on very tall shoulders --
+]
+---
+class: inverse, center, middle
+
+# What is 'synchronous' or 'asynchronous' evaluation?
+
+---
+
+# Synchronous Evaluation
+
+![](synchronous.jpg)
+.center[Tasks must wait for the previous one to complete]
+
+---
+
+# **A**synchronous Evaluation
+
+![](async_sequential_small.jpg)
+.center[Tasks can be run in parallel]
+
+---
+
+# **A**synchronous Evaluation
+
+.pull-left[
+![](async_multi.jpg)
+.center[Tasks can be run in parallel and can depend on other tasks, but they need to know what to expect]
+]
+
+--
+
+.pull-right[
+![](async_long.jpg)
+.center[Large gains can be made if the bottleneck is identified]
+]
+
+--
+
+This is hardly a new notion in general, but it isn't baked into R.
+
+---
+
+# IOU
+
+We need something like an IOU for a value. The value isn't determined yet, but we're 
+letting the session know that it _will be_, so it can be used in other contexts.
+
+--
+
+We don't want to share the _entire_ environment to every child process, but they do need to know about 
+values, packages, settings, etc...
+
+--
+
+At the end, we need to collect the results back to our environment.
+
+---
+class: inverse, center, middle
+
+`future`
+
+---
+
+# `future`
+
+Define an expression to be evaluated later
+
+```{r, eval = FALSE}
+f <- future(<long-running code>)
+value <- value(f)
+```
+
+or concisely
+
+```{r, eval = FALSE}
+value %<-% {
+  <long-running code>
+}
+```
+
+--
+
+Some clever inspection of global variables and packages, which are then involved in the 'promise'/IOU.
+
+---
+
+# `future`
+
+```{r}
+library(future)
+a <- 1
+f <- future({ a + 1 })
+```
+
+--
+
+What does this create?
+
+---
+
+# `future`
+
+```{r}
+f
+```
+
+---
+
+# `future`
+
+This has been 'resolved' (completed) so we can extract the value
+
+```{r}
+value(f)
+```
+
+---
+
+# `future`
+
+What about lazy evaluation?
+
+--
+
+```{r}
+tenMin_f <- function(x, y = Sys.sleep(10*60)) {
+  x
+}
+tenMin_f(pi)
+```
+
+i.e. don't evaluate this until you _need_ to.
+
+--
+
+```{r}
+f <- future({ a + 1 }, lazy = TRUE)
+```
+
+This creates the `future` object _now_, but postpones evaluating it until it is requested.
+
+---
+
+# `future`
+
+```{r}
+f
+```
+
+---
+
+# `future`
+
+Using the simple syntax
+
+```{r}
+f %<-% { a + 1 }
+f
+```
+
+---
+
+# `future`
+
+There are many options for how to perform the evaluation
+
+- `plan(sequential)`
+- `plan(multiprocess)`
+(equivalent to `plan(multicore)` or `plan(multisession)`)
+- `plan(cluster)`
+(including `future.batchtools`)
+- `plan(remote)`
+
+--
+
+`plan(sequential)` is synchronous -- evaluations are performed one after the other
+
+-- live demo: `sequential.R` --
+
+---
+
+# `future`
+
+This is just regular evaluation though. We can extend this with the same syntax to use `plan(multiprocess)`
+
+-- live demo: `multiprocess.R` -- 
+
+---
+
+# `future`
+
+We can see if a future has been resolved using `resolved(futureOf(x))` but we can't know _when_ that will change
+
+-- live demo: `resolved.R` --
+
+---
+
+# `future`
+
+What if we encounter an error on the forked process?
+
+-- live demo: `error.R` --
+
+---
+
+# `future`
+
+We can nest futures together with some restrictions
+
+-- live demo: `nest.R` --
+
+---
+
+# `future`
+
+But the resolution cannot cross futures
+
+-- live demo: `shared.R` --
+
+---
+
+# `future`
+
+Do we always need to wait for everything to be resolved? No.
+
+-- live demo: `list.R` --
+
+---
+
+# `future`
+
+This isn't limited to the resources on _this_ computer at all
+
+```{r, eval = FALSE}
+library(future.batchtools)
+plan(batchtools_lsf, 
+     resources = list(
+       n.cores = 2, 
+       queue = "medium"
+     )
+)
+```
+
+---
+
+# `future`
+
+This seems like a lot of work. Can we just hook this into some sort of loop? Yes.
+
+First, let's step back to the sequential world
+
+---
+
+# loops/maps
+
+> "To iterate over a collection, someone needs to write the loop. 
+>
+> It doesn't have to be you."
+>                                            -- Jenny Bryan
+
+--
+
+Some tasks are "embarassingly parallel" which makes them easy to distribute across cores.
+
+--
+
+One option: 
+
+```{r, eval = FALSE}
+for (x in collection) { f(x) }
+```
+
+--
+
+Alternatively 
+
+```{r, eval = FALSE}
+sapply(seq_along(collection), f)
+```
+
+--
+
+Alternatively 
+
+```{r, eval = FALSE}
+purrr::map(seq_along(collection), f)
+```
+
+---
+
+# `furrr`
+
+```{r, eval = FALSE}
+library(furrr)
+plan(multiprocess)
+future_map(seq_along(collection), f)
+```
+
+--
+
+to replace e.g.
+
+```{r}
+bench::system_time(
+  purrr::map(1:4, ~Sys.sleep(5))
+)
+```
+
+---
+  
+# `furrr`
+
+```{r}
+library(furrr)
+plan(multiprocess, workers = 4)
+bench::system_time(
+  furrr::future_map(1:4, ~Sys.sleep(5))
+)
+```
+
+--
+
+We can even add a progress bar
+
+-- live demo: `furrr.R` --
+
+---
+
+# `furrr`
+
+Implemented:
+
+- `future_map`
+- `future_map_chr`, ...
+- `future_imap`, ...
+- `future_map2`, ...
+- `future_walk`, 
+- `future_pmap`, ...
+
+--
+
+A good drop-in replacement for `purrr` evaluations.
+
+---
+
+# `promises`
+
+RStudio have built on top of this in the form of `promises` which interacts with `shiny`.
+
+These _always_ return a promise, but `shiny` knows how to use them.
+
+-- live demo: `synchronous.R` --
+
+-- live demo: `asynchronous.R` --
+
+---
+
+# Asynchronous plotting
+
+-- live demo: `mandelbrot.R` --
+
+---
+
+# RStudio itself is about to play a larger role in this...
+
+-- live demo: `dash.R` --
+
+---
+class: invert, middle
+
+Many thanks to:
+
+ - `future`: Henrik Bengtsson
+ - `furrr`: Davis Vaughan
+ - `promises`: Joe Cheng
+ - `RStudio` team
+ - `R Core` team
+ - YOU for listening.
+

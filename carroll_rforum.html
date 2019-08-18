@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Asynchronous R</title>
+    <meta charset="utf-8">
+    <meta name="author" content="Jonathan Carroll" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Asynchronous R
+## Welcome to the future!
+### Jonathan Carroll
+### 2018/06/18 (updated: 2019-08-12)
+
+---
+
+class: middle
+
+
+
+# Asynchronous R
+
+Topics I'll be convering:
+
+- Synchronous vs asynchronous evaluation
+- `future`
+- `promises`
+- `furrr`
+- `RStudio Jobs`
+
+.footnote[
+  -- I'm not an expert in this, I am merely standing on very tall shoulders --
+]
+---
+class: inverse, center, middle
+
+# What is 'synchronous' or 'asynchronous' evaluation?
+
+---
+
+# Synchronous Evaluation
+
+![](synchronous.jpg)
+.center[Tasks must wait for the previous one to complete]
+
+---
+
+# **A**synchronous Evaluation
+
+![](async_sequential_small.jpg)
+.center[Tasks can be run in parallel]
+
+---
+
+# **A**synchronous Evaluation
+
+.pull-left[
+![](async_multi.jpg)
+.center[Tasks can be run in parallel and can depend on other tasks, but they need to know what to expect]
+]
+
+--
+
+.pull-right[
+![](async_long.jpg)
+.center[Large gains can be made if the bottleneck is identified]
+]
+
+--
+
+This is hardly a new notion in general, but it isn't baked into R.
+
+---
+
+# IOU
+
+We need something like an IOU for a value. The value isn't determined yet, but we're 
+letting the session know that it _will be_, so it can be used in other contexts.
+
+--
+
+We don't want to share the _entire_ environment to every child process, but they do need to know about 
+values, packages, settings, etc...
+
+--
+
+At the end, we need to collect the results back to our environment.
+
+---
+class: inverse, center, middle
+
+`future`
+
+---
+
+# `future`
+
+Define an expression to be evaluated later
+
+
+```r
+f &lt;- future(&lt;long-running code&gt;)
+value &lt;- value(f)
+```
+
+or concisely
+
+
+```r
+value %&lt;-% {
+  &lt;long-running code&gt;
+}
+```
+
+--
+
+Some clever inspection of global variables and packages, which are then involved in the 'promise'/IOU.
+
+---
+
+# `future`
+
+
+```r
+library(future)
+a &lt;- 1
+f &lt;- future({ a + 1 })
+```
+
+--
+
+What does this create?
+
+---
+
+# `future`
+
+
+```r
+f
+```
+
+```
+## SequentialFuture:
+## Label: '&lt;none&gt;'
+## Expression:
+## {
+##     a + 1
+## }
+## Lazy evaluation: FALSE
+## Asynchronous evaluation: FALSE
+## Local evaluation: TRUE
+## Environment: &lt;environment: R_GlobalEnv&gt;
+## Globals: 1 objects totaling 48 bytes (numeric 'a' of 48 bytes)
+## Packages: &lt;none&gt;
+## L'Ecuyer-CMRG RNG seed: &lt;none&gt;
+## Resolved: TRUE
+## Value: 48 bytes of class 'numeric'
+## Condition: 'NULL'
+## Early signalling: FALSE
+## Owner process: b2ba3751-55f5-98a4-255c-320807d7fed8
+## Class: 'SequentialFuture', 'UniprocessFuture', 'Future', 'environment'
+```
+
+---
+
+# `future`
+
+This has been 'resolved' (completed) so we can extract the value
+
+
+```r
+value(f)
+```
+
+```
+## [1] 2
+```
+
+---
+
+# `future`
+
+What about lazy evaluation?
+
+--
+
+
+```r
+tenMin_f &lt;- function(x, y = Sys.sleep(10*60)) {
+  x
+}
+tenMin_f(pi)
+```
+
+```
+## [1] 3.141593
+```
+
+i.e. don't evaluate this until you _need_ to.
+
+--
+
+
+```r
+f &lt;- future({ a + 1 }, lazy = TRUE)
+```
+
+This creates the `future` object _now_, but postpones evaluating it until it is requested.
+
+---
+
+# `future`
+
+
+```r
+f
+```
+
+```
+## SequentialFuture:
+## Label: '&lt;none&gt;'
+## Expression:
+## {
+##     a + 1
+## }
+## Lazy evaluation: TRUE
+## Asynchronous evaluation: FALSE
+## Local evaluation: TRUE
+## Environment: &lt;environment: R_GlobalEnv&gt;
+## Globals: 1 objects totaling 48 bytes (numeric 'a' of 48 bytes)
+## Packages: &lt;none&gt;
+## L'Ecuyer-CMRG RNG seed: &lt;none&gt;
+## Resolved: FALSE
+## Value: &lt;not collected&gt;
+## Condition: &lt;not collected&gt;
+## Early signalling: FALSE
+## Owner process: b2ba3751-55f5-98a4-255c-320807d7fed8
+## Class: 'SequentialFuture', 'UniprocessFuture', 'Future', 'environment'
+```
+
+---
+
+# `future`
+
+Using the simple syntax
+
+
+```r
+f %&lt;-% { a + 1 }
+f
+```
+
+```
+## [1] 2
+```
+
+---
+
+# `future`
+
+There are many options for how to perform the evaluation
+
+- `plan(sequential)`
+- `plan(multiprocess)`
+(equivalent to `plan(multicore)` or `plan(multisession)`)
+- `plan(cluster)`
+(including `future.batchtools`)
+- `plan(remote)`
+
+--
+
+`plan(sequential)` is synchronous -- evaluations are performed one after the other
+
+-- live demo: `sequential.R` --
+
+---
+
+# `future`
+
+This is just regular evaluation though. We can extend this with the same syntax to use `plan(multiprocess)`
+
+-- live demo: `multiprocess.R` -- 
+
+---
+
+# `future`
+
+We can see if a future has been resolved using `resolved(futureOf(x))` but we can't know _when_ that will change
+
+-- live demo: `resolved.R` --
+
+---
+
+# `future`
+
+What if we encounter an error on the forked process?
+
+-- live demo: `error.R` --
+
+---
+
+# `future`
+
+We can nest futures together with some restrictions
+
+-- live demo: `nest.R` --
+
+---
+
+# `future`
+
+But the resolution cannot cross futures
+
+-- live demo: `shared.R` --
+
+---
+
+# `future`
+
+Do we always need to wait for everything to be resolved? No.
+
+-- live demo: `list.R` --
+
+---
+
+# `future`
+
+This isn't limited to the resources on _this_ computer at all
+
+
+```r
+library(future.batchtools)
+plan(batchtools_lsf, 
+     resources = list(
+       n.cores = 2, 
+       queue = "medium"
+     )
+)
+```
+
+---
+
+# `future`
+
+This seems like a lot of work. Can we just hook this into some sort of loop? Yes.
+
+First, let's step back to the sequential world
+
+---
+
+# loops/maps
+
+&gt; "To iterate over a collection, someone needs to write the loop. 
+&gt;
+&gt; It doesn't have to be you."
+&gt;                                            -- Jenny Bryan
+
+--
+
+Some tasks are "embarassingly parallel" which makes them easy to distribute across cores.
+
+--
+
+One option: 
+
+
+```r
+for (x in collection) { f(x) }
+```
+
+--
+
+Alternatively 
+
+
+```r
+sapply(seq_along(collection), f)
+```
+
+--
+
+Alternatively 
+
+
+```r
+purrr::map(seq_along(collection), f)
+```
+
+---
+
+# `furrr`
+
+
+```r
+library(furrr)
+plan(multiprocess)
+future_map(seq_along(collection), f)
+```
+
+--
+
+to replace e.g.
+
+
+```r
+bench::system_time(
+  purrr::map(1:4, ~Sys.sleep(5))
+)
+```
+
+```
+## process    real 
+##   2.7ms     20s
+```
+
+---
+  
+# `furrr`
+
+
+```r
+library(furrr)
+plan(multiprocess, workers = 4)
+bench::system_time(
+  furrr::future_map(1:4, ~Sys.sleep(5))
+)
+```
+
+```
+##  process     real 
+## 336.64ms    5.47s
+```
+
+--
+
+We can even add a progress bar
+
+-- live demo: `furrr.R` --
+
+---
+
+# `furrr`
+
+Implemented:
+
+- `future_map`
+- `future_map_chr`, ...
+- `future_imap`, ...
+- `future_map2`, ...
+- `future_walk`, 
+- `future_pmap`, ...
+
+--
+
+A good drop-in replacement for `purrr` evaluations.
+
+---
+
+# `promises`
+
+RStudio have built on top of this in the form of `promises` which interacts with `shiny`.
+
+These _always_ return a promise, but `shiny` knows how to use them.
+
+-- live demo: `synchronous.R` --
+
+-- live demo: `asynchronous.R` --
+
+---
+
+# Asynchronous plotting
+
+-- live demo: `mandelbrot.R` --
+
+---
+
+# RStudio itself is about to play a larger role in this...
+
+-- live demo: `dash.R` --
+
+---
+class: invert, middle
+
+Many thanks to:
+
+ - `future`: Henrik Bengtsson
+ - `furrr`: Davis Vaughan
+ - `promises`: Joe Cheng
+ - `RStudio` team
+ - `R Core` team
+ - YOU for listening.
+    </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function() {
+  var d = document, s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})();</script>
+
+<script>
+(function() {
+  var i, text, code, codes = document.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+})();
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
