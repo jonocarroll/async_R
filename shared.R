@@ -61,3 +61,9 @@ f %<-% {
   mtcars %>% 
     filter(cyl == 4)
 }
+unloadNamespace("dplyr")
+f
+
+find("filter")
+library(dplyr)
+find("filter")

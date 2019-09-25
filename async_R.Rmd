@@ -10,6 +10,7 @@ output:
       highlightStyle: github
       highlightLines: true
       countIncrementalSlides: false
+    css: [default, lucy, metropolis-fonts, "my-theme.css"]
 ---
 class: middle
 
@@ -27,9 +28,13 @@ Topics I'll be convering:
 - `furrr`
 - `RStudio Jobs`
 
-.footnote[
-  -- I'm not an expert in this, I am merely standing on very tall shoulders --
-]
+---
+class: center, middle
+
+Caveat:
+
+ *I'm not an expert in this, I am merely standing on very tall shoulders*
+
 ---
 class: inverse, center, middle
 
@@ -71,6 +76,11 @@ This is hardly a new notion in general, but it isn't baked into R.
 
 ---
 
+.large[For one process to depend on another unevaluated process, we need a way 
+to chain together expressions]
+
+---
+
 # IOU
 
 We need something like an IOU for a value. The value isn't determined yet, but we're 
@@ -88,7 +98,7 @@ At the end, we need to collect the results back to our environment.
 ---
 class: inverse, center, middle
 
-`future`
+.reallylarge[`future`]
 
 ---
 
